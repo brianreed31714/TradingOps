@@ -97,11 +97,15 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python -m tradingops.repo_audit --output tradingops-audit.json
+      - name: Build tamper-evident shadow observation ledger
+        run: python -m tradingops.ledger --audit tradingops-audit.json --output tradingops-ledger.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: tradingops-shadow-audit
-          path: tradingops-audit.json
+          path: |
+            tradingops-audit.json
+            tradingops-ledger.json
           if-no-files-found: warn
           retention-days: 30
       - name: Pushover exception alert (explicitly configured only)
