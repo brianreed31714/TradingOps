@@ -17,7 +17,7 @@ class ActiveTraderTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         # Exercise Windows path semantics with real temporary files on Linux CI.
         if self.root.as_posix().startswith('/'):
             original_normalize = normalized_windows_path
