@@ -17,6 +17,12 @@ class NotifyTests(unittest.TestCase):
             "project": "CryptoTracker", "source_sha": "a"*40,
             "host_status": {"status": "HOST_CLAIM_ONLY"}}]}), "")
 
+    def test_host_status_missing_is_an_exception(self):
+        msg = exception_summary({"projects": [
+            {"project": "StockTracker", "host_status": {"status": "MISSING"}}
+        ]})
+        self.assertIn("host evidence MISSING", msg)
+
     def test_source_missing_and_stale_are_alerts(self):
         msg = exception_summary({"projects": [
             {"project": "StockTracker", "source": "MISSING"},

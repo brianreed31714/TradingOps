@@ -13,7 +13,7 @@ import urllib.parse
 import urllib.request
 
 ENDPOINT = "https://api.pushover.net/1/messages.json"
-ALERT_HOST_STATUSES = {"MISMATCH", "STALE"}
+ALERT_HOST_STATUSES = {"MISMATCH", "STALE", "MISSING"}
 
 
 def exception_summary(audit):
