@@ -10,13 +10,14 @@ from tradingops.windows_probe import launched_script, process_status, probe_proj
 class WindowsProbeTests(unittest.TestCase):
     def test_only_canonical_absolute_script_arg_counts(self):
         target = r"C:\\Users\\agent\\StockTracker\\trader.py"
-        yes = {"cmdline": ["python.exe", "-u", target]}
+        yes = {"pid": 42, "create_time": 1730000000.0, "exe": r"C:\Python312\python.exe",
+               "cmdline": [r"C:\Python312\python.exe", "-u", target]}
         evil = {"cmdline": ["python.exe", "launcher.py", target]}
         other = {"cmdline": ["python.exe", r"C:\\backup\\trader.py"]}
         self.assertEqual(launched_script(yes["cmdline"]), ntpath.normcase(ntpath.normpath(target)))
-        self.assertEqual(process_status(target, [yes, other, evil]), "ONE_EXACT_SCRIPT_PATH_OBSERVED")
+        self.assertEqual(process_status(target, [yes, other, evil]), "EXACT_SCRIPT_AND_PROCESS_START_OBSERVED_ONLY")
         self.assertEqual(process_status(target, [yes, yes]), "AMBIGUOUS_MULTIPLE_PROCESSES")
-        self.assertEqual(process_status(target, [evil]), "PROCESS_NOT_OBSERVED")
+        self.assertEqual(process_status(target, [evil]), "PROCESS_IDENTITY_UNCERTAIN")
         self.assertIsNone(launched_script(["python.exe", "-m", "trader"]))
 
     def test_missing_registry_fails_closed(self):

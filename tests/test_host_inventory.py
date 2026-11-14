@@ -43,7 +43,7 @@ class HostInventoryTests(unittest.TestCase):
 
     def test_strict_process_identity_and_incomplete_observation(self):
         script = r"C:\\repo\\StockTracker\\run.py"
-        right = {"cmdline": ["C:\\Python312\\python.exe", script],
+        right = {"pid": 42, "cmdline": ["C:\\Python312\\python.exe", script],
                  "create_time": 1730000000.0, "exe": r"C:\\Python312\\python.exe"}
         wrong = {"cmdline": ["python.exe", r"C:\\repo\\old\\run.py"],
                  "create_time": 1730000000.0, "exe": r"C:\\Python312\\python.exe"}

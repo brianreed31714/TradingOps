@@ -14,7 +14,8 @@ from pathlib import Path
 import re
 import subprocess
 
-from tradingops.windows_probe import launched_script, normalized_windows_path
+from tradingops.windows_probe import process_status, collect_process_observations
+from tradingops.entrypoints import resolve_entrypoint
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
 PROJECTS = frozenset({"StockTracker", "CryptoTracker"})
@@ -48,55 +49,8 @@ def local_source_snapshot(root: Path, *, run=subprocess.run):
 
 def matching_process_state(expected_script: str, observations: list, *,
                            enumeration_complete: bool):
-    """Canonical script argument is a weak observation, NOT a runtime gate."""
-    expected = normalized_windows_path(expected_script)
-    if not expected:
-        return "EXPECTED_PATH_UNVERIFIED"
-    if not enumeration_complete:
-        return "PROCESS_ENUMERATION_INCOMPLETE"
-    matches = [
-        row for row in observations
-        if isinstance(row, dict)
-        and launched_script(row.get("cmdline")) == expected
-    ]
-    if not matches:
-        return "PROCESS_NOT_OBSERVED"
-    if len(matches) != 1:
-        return "AMBIGUOUS_MULTIPLE_PROCESSES"
-    item = matches[0]
-    timestamp = item.get("create_time")
-    if not isinstance(timestamp, (int, float)) or isinstance(timestamp, bool) or timestamp <= 0:
-        return "PROCESS_START_TIME_UNVERIFIED"
-    exe = item.get("exe")
-    if not isinstance(exe, str) or not normalized_windows_path(exe):
-        return "EXECUTABLE_PATH_UNVERIFIED"
-    # Python modules can be imported after startup; this does not attest them.
-    return "EXACT_SCRIPT_AND_PROCESS_START_OBSERVED_ONLY"
-
-
-def collect_process_observations():
-    """Return process evidence plus quality, fail closed on incomplete scans."""
-    try:
-        import psutil
-    except ImportError:
-        return [], False, "PSUTIL_UNAVAILABLE"
-    observations = []
-    complete = True
-    try:
-        for proc in psutil.process_iter(["cmdline", "create_time", "exe"]):
-            try:
-                observations.append({
-                    "cmdline": proc.info.get("cmdline"),
-                    "create_time": proc.info.get("create_time"),
-                    "exe": proc.info.get("exe"),
-                })
-            except (psutil.NoSuchProcess, psutil.ZombieProcess):
-                continue
-            except psutil.AccessDenied:
-                complete = False
-    except (psutil.AccessDenied, OSError):
-        complete = False
-    return observations, complete, "COMPLETE" if complete else "PARTIAL"
+    return process_status(expected_script, observations,
+                          enumeration_complete=enumeration_complete)
 
 
 def inspect_project(root, project, observations, *, enumeration_complete, now=None,
@@ -120,21 +74,19 @@ def inspect_project(root, project, observations, *, enumeration_complete, now=No
     try:
         registry = json.loads((root / "infrastructure" / "registry.json").read_text(
             encoding="utf-8"))
-        if registry.get("project") != project or registry.get("mode") != "PAPER_ONLY":
+        if not isinstance(registry, dict) or registry.get("project") != project or registry.get("mode") != "PAPER_ONLY":
             raise ValueError("Unexpected project or non-paper registry")
-        components = {entry["id"]: entry for entry in registry["components"]
-                      if isinstance(entry, dict) and isinstance(entry.get("id"), str)}
+        report["entrypoint_resolution"] = {}
         for name in TARGETS:
-            item = components.get(name) or {}
-            entrypoint = item.get("entrypoint")
-            if not isinstance(entrypoint, str) or not entrypoint.endswith(".py"):
+            try:
+                expected, source, authoritative = resolve_entrypoint(root, registry, name)
+                report["entrypoint_resolution"][name] = source
+                state = matching_process_state(expected, observations,
+                                               enumeration_complete=enumeration_complete)
+                report["processes"][name] = state if authoritative else "ACTIVE_ENTRYPOINT_UNCERTAIN:" + state
+            except (OSError, ValueError, TypeError, KeyError):
+                report["entrypoint_resolution"][name] = "UNVERIFIED"
                 report["processes"][name] = "REGISTRY_ENTRYPOINT_UNVERIFIED"
-                continue
-            expected = str(root / entrypoint)
-            report["processes"][name] = matching_process_state(
-                expected, observations, enumeration_complete=enumeration_complete)
-        # A registry fallback can disagree with the active release manifest.
-        # This is never enough to confirm an actually loaded runtime version.
         report["registry"] = "PAPER_ONLY_REGISTRY_OBSERVED"
         report["active_release_manifest"] = "NOT_INDEPENDENTLY_VALIDATED"
     except (OSError, ValueError, TypeError, KeyError):
