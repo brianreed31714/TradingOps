@@ -1,4 +1,5 @@
 import json
+import ntpath
 from pathlib import Path
 import tempfile
 import unittest
@@ -12,7 +13,7 @@ class WindowsProbeTests(unittest.TestCase):
         yes = {"cmdline": ["python.exe", "-u", target]}
         evil = {"cmdline": ["python.exe", "launcher.py", target]}
         other = {"cmdline": ["python.exe", r"C:\\backup\\trader.py"]}
-        self.assertEqual(launched_script(yes["cmdline"]).lower(), target.lower())
+        self.assertEqual(launched_script(yes["cmdline"]), ntpath.normcase(ntpath.normpath(target)))
         self.assertEqual(process_status(target, [yes, other, evil]), "ONE_EXACT_SCRIPT_PATH_OBSERVED")
         self.assertEqual(process_status(target, [yes, yes]), "AMBIGUOUS_MULTIPLE_PROCESSES")
         self.assertEqual(process_status(target, [evil]), "PROCESS_NOT_OBSERVED")
