@@ -1,0 +1,117 @@
+name: TradingOps independent source build
+on:
+  push:
+    branches: [main, design/shadow-lifecycle-v1]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 */6 * * *'
+permissions:
+  contents: read
+concurrency:
+  group: tradingops-build-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: false
+jobs:
+  controller-unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test independent controller (no trader imports)
+        run: python -m unittest discover -s tests -v
+      - name: Compile controller modules
+        run: python -m compileall -q tradingops
+
+  independent-source-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        project: [StockTracker, CryptoTracker]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout exact source from project main
+        uses: actions/checkout@v4
+        with:
+          repository: brianreed31714/${{ matrix.project }}
+          ref: main
+          path: candidate
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install isolated contract-test dependencies
+        shell: bash
+        run: python -m pip install requests python-dotenv tzdata psutil
+      - name: Compile source without starting any trader
+        shell: bash
+        working-directory: candidate
+        run: |
+          python -m py_compile infrastructure/registry_contract.py infrastructure/windows_activation_attestation.py infrastructure/host_status_publisher.py
+      - name: Run source contract tests, never trading scripts
+        id: contract
+        shell: bash
+        working-directory: candidate
+        run: python -m unittest -v infrastructure.test_registry_contract infrastructure.test_script_version
+      - name: Record exact checkout and source-only result
+        if: always()
+        shell: bash
+        env:
+          PROJECT: ${{ matrix.project }}
+          RUNNER_OS: ${{ runner.os }}
+          TEST_OUTCOME: ${{ steps.contract.outcome }}
+        run: |
+          python - <<'PY'
+          import datetime, json, os, pathlib, subprocess
+          p = subprocess.run(["git", "-C", "candidate", "rev-parse", "HEAD"],
+                             capture_output=True, text=True)
+          sha = p.stdout.strip() if p.returncode == 0 else "UNVERIFIED"
+          result = {"schema_version": 1, "kind": "INDEPENDENT_SOURCE_BUILD_ONLY",
+                    "project": os.environ["PROJECT"], "runner_os": os.environ["RUNNER_OS"],
+                    "source_sha": sha, "source_contract_result": os.environ["TEST_OUTCOME"],
+                    "observed_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "windows_host_activated": False,
+                    "loaded_trader_code_verified": False,
+                    "deployment_authority": False}
+          pathlib.Path("source-build-evidence.json").write_text(
+              json.dumps(result, indent=2) + "\n", encoding="utf-8")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: source-build-${{ matrix.project }}-${{ runner.os }}
+          path: source-build-evidence.json
+          if-no-files-found: error
+          retention-days: 30
+
+  cross-project-shadow-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Read GitHub checks and sanitized Windows host claims
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -m tradingops.repo_audit --output tradingops-audit.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tradingops-shadow-audit
+          path: tradingops-audit.json
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Pushover exception alert (explicitly configured only)
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        env:
+          PUSHOVER_API_TOKEN: ${{ secrets.PUSHOVER_API_TOKEN }}
+          PUSHOVER_USER_KEY: ${{ secrets.PUSHOVER_USER_KEY }}
+        run: |
+          if [ -n "$PUSHOVER_API_TOKEN" ] && [ -n "$PUSHOVER_USER_KEY" ]; then
+            python -m tradingops.notify --audit tradingops-audit.json --send
+          else
+            echo "Pushover not configured; no notification attempted"
+          fi
