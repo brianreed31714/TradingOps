@@ -97,7 +97,7 @@ jobs:
       - name: Run negative safety tests for host observer
         shell: pwsh
         run: |
-          python -m unittest -v tests.test_host_inventory tests.test_windows_probe
+          python -m unittest discover -s tests -v
           if ($LASTEXITCODE -ne 0) { throw "Host observer contract tests failed" }
       - name: Validate Windows PowerShell bootstrap syntax without executing
         shell: pwsh
